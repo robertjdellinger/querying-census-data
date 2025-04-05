@@ -1,0 +1,163 @@
+---
+title: "**Querying EPA FRS Data**"
+author: "Robert J. Dellinger"
+date: "2024"
+output:
+  html_document:
+    fig_caption: true
+    css: default
+header-includes:
+  # Set page margins using geometry package
+  - \usepackage{geometry}
+  - \geometry{left=1in, right=1in, top=1in, bottom=1in}
+  
+  # Enable double-spacing for readability
+  - \usepackage{setspace}
+  - \doublespacing
+  
+  # Customize the header and footer using fancyhdr
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[L]{}
+  - \fancyhead[C]{Scientific Hypothesis and Preliminary Data Explorations}
+  - \fancyhead[R]{}
+  - \fancyfoot[L]{}
+  - \fancyfoot[C]{\thepage}
+  - \fancyfoot[R]{}
+  - \renewcommand{\headrulewidth}{0.2pt}
+  - \renewcommand{\footrulewidth}{0pt}
+---
+
+------------------------------------------------------------------------
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load the necessary libraries
+library(tidyverse)
+library(sf)
+library(tidycensus)
+library(tigris)
+library(here)
+library(gt)
+library(ggplot2)
+library(httr)
+library(jsonlite)
+library(furrr)
+library(purrr)
+```
+
+
+```{r}
+# Set tigris options for spatial data handling
+options(tigris_class = "sf")
+options(tigris_use_cache = TRUE)
+
+# Set your Census API key (replace with your own key)
+#census_api_key("YOUR CENSUS API KEY HERE", install = TRUE)
+
+```
+
+
+
+```{r}
+
+num_cores <- availableCores() - 1
+plan(multisession, workers = num_cores)
+
+# Vector of one or more counties
+la_counties <- c("Los Angeles")
+
+# Query ACS block group data for each county (parallel-capable)
+la_bg_sf <- reduce(
+  future_map(la_counties, function(county) {
+    get_acs(
+      geography = "block group", 
+      variables = c(
+        "pop_total" = "B03002_001",   # Total population
+        "hh_incomeM" = "B19013_001",   # Median household income
+        "hu_total"  = "B25001_001"    # Total housing units
+      ), 
+      year = 2020,
+      survey = "acs5",
+      state = "CA",
+      county = county,
+      geometry = TRUE,
+      output = "wide",
+      keep_geo_vars = TRUE
+    )
+  }, .progress = TRUE),
+  rbind
+)
+
+# Clean the data: remove missing income values
+la_bg_sf_clean <- la_bg_sf %>%
+  filter(!is.na(hh_incomeMM)) 
+
+# Plot
+ggplot(data = la_bg_sf_clean) +
+  geom_sf(aes(fill = hh_incomeME), color = NA) +
+  viridis::scale_fill_viridis(
+    name = "Median Income ($)",
+    option = "plasma",
+    trans = "log", 
+    na.value = "white"
+  ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Median Household Income by Census Tract",
+    subtitle = "Los Angeles County, California (ACS 2019)",
+    caption = "Source: U.S. Census Bureau, 2019 ACS 5-Year Estimates"
+  ) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 14, hjust = 0.5),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+```
+
+```{r}
+%>% 
+  filter(!is.na(latitude) & !is.na(longitude)) %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+
+ca_bg_sf <- st_transform(ca_bg_sf, crs = 4326)
+
+# Spatial join: assign each facility to a block group
+facilities_joined <- st_join(ghg_facilities, ca_bg_sf, left = FALSE)
+
+# Count facilities per block group
+facility_counts_bg <- facilities_joined %>%
+  group_by(GEOID) %>%
+  summarise(n_facilities = n())
+
+
+```
+```
+
+
+```{r}
+
+
+# Filter out geometries with missing income data
+ntl_income <- ntl_bg_sf %>%
+  filter(!is.na(hh_medincE))
+
+# Plot median household income by block group
+ggplot(data = ntl_income) +
+  geom_sf(aes(fill = hh_medincE), color = NA) +
+  scale_fill_viridis(
+    name = "Median Household Income",
+    option = "plasma",
+    trans = "log",  # Income is typically skewed, so log transform is helpful
+    na.value = "grey90"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Median Household Income by Census Block Group (ACS 2019)",
+    caption = "Data Source: U.S. Census Bureau, ACS 5-Year Estimates"
+  )
+```
+

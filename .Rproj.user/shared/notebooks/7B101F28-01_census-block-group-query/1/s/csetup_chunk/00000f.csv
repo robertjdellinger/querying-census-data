@@ -1,0 +1,11 @@
+"0","knitr::opts_chunk$set(echo = TRUE)"
+"0",""
+"0","# Load the necessary libraries"
+"0","library(furrr)       # For parallel processing"
+"0","library(purrr)       # For reduce function"
+"0","library(tidycensus)  # To access ACS data"
+"0","library(tigris)      # For FIPS codes and spatial data"
+"0","library(sf)         # For handling spatial data"
+"2","Linking to GEOS 3.13.0, GDAL 3.8.5, PROJ 9.5.1; sf_use_s2() is TRUE
+"
+"0","library(ggplot2)     # For plotting"

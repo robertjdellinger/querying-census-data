@@ -1,0 +1,201 @@
+---
+title: "**Querying Census Data**"
+author: "Robert J. Dellinger"
+date: "2024"
+output:
+  html_document:
+    fig_caption: true
+    css: default
+header-includes:
+  # Set page margins using geometry package
+  - \usepackage{geometry}
+  - \geometry{left=1in, right=1in, top=1in, bottom=1in}
+  
+  # Enable double-spacing for readability
+  - \usepackage{setspace}
+  - \doublespacing
+  
+  # Customize the header and footer using fancyhdr
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[L]{}
+  - \fancyhead[C]{Scientific Hypothesis and Preliminary Data Explorations}
+  - \fancyhead[R]{}
+  - \fancyfoot[L]{}
+  - \fancyfoot[C]{\thepage}
+  - \fancyfoot[R]{}
+  - \renewcommand{\headrulewidth}{0.2pt}
+  - \renewcommand{\footrulewidth}{0pt}
+---
+
+------------------------------------------------------------------------
+
+# Methods
+
+## Census Data Collection
+
+We obtained demographic, housing, and income data from the 2016–2020 American Community Survey (ACS) 5-Year Estimates at the block group level for Los Angeles County, California using the tidycensus R package (Walker, 2023). Data were accessed via the U.S. Census API, and spatial geometries were downloaded directly using the geometry = TRUE argument, leveraging TIGER/Line shapefiles via the tigris package.
+
+We requested variables from the following ACS tables:
+	•	B03002: Race and Hispanic origin
+	•	B25001: Total housing units
+	•	B25003: Housing tenure (owner vs. renter)
+	•	B19013: Median household income
+
+To speed up download and support scale-up to national datasets, we used the furrr package to apply get_acs() across counties in parallel, using all available CPU threads except one.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load the necessary libraries
+library(furrr)       # For parallel processing
+library(purrr)       # For reduce function
+library(tidycensus)  # To access ACS data
+library(tigris)      # For FIPS codes and spatial data
+library(sf)         # For handling spatial data
+library(ggplot2)     # For plotting
+```
+
+
+
+```{r load-options}
+
+# Set tigris options for spatial data handling
+options(tigris_class = "sf")
+options(tigris_use_cache = TRUE)
+
+# Set your Census API key (replace with your own key)
+#census_api_key("YOUR CENSUS API KEY HERE", install = TRUE)
+
+# Set up parallel processing using all but one of your available cores
+num_cores <- availableCores() - 1
+print(paste("Thread count to use:", num_cores))
+plan(multisession, workers = num_cores)
+```
+
+
+
+```{r census-block-state, message=FALSE, warning=FALSE}
+
+# California only
+fips.ca <- "CA"
+
+# Run with same structure (for consistency with national code)
+ca_bg_sf <- reduce(
+  future_map(fips.ca, function(x) {
+    get_acs(
+      geography = "block group", 
+      variables = c(
+        "pop"         = "B03002_001",  # Total population
+        "pop_nhwhite" = "B03002_003",  # Non-Hispanic White
+        "pop_nhblack" = "B03002_004",  # Non-Hispanic Black
+        "popx_nhamind"= "B03002_005",  # Non-Hispanic American Indian
+        "popx_nhasian"= "B03002_006",  # Non-Hispanic Asian
+        "popx_nhhwnpi"= "B03002_007",  # Non-Hispanic Hawaiian/PI
+        "popx_nhother"= "B03002_008",  # Non-Hispanic Other
+        "popx_nhtwomr"= "B03002_009",  # Non-Hispanic Two+
+        "pop_hispltx" = "B03002_012",  # Hispanic/Latinx
+        "hu_total"    = "B25001_001",  # Total housing units
+        "hu_totocc"   = "B25003_001",  # Occupied housing units
+        "hu_totown"   = "B25003_002",  # Owner-occupied
+        "hu_totrnt"   = "B25003_003",  # Renter-occupied
+        "hh_total"    = "B19001_001",  # Total households
+        "hh_medinc"   = "B19013_001"   # Median household income
+      ), 
+      year = 2019,
+      survey = "acs5",
+      state = x,
+      geometry = TRUE,
+      output = "wide",
+      keep_geo_vars = TRUE
+    )
+  }, .progress = TRUE),
+  rbind
+)
+
+# Plot map
+ggplot(data = ca_bg_sf) +
+  geom_sf(aes(fill = hh_medincE), color = NA) +
+  viridis::scale_fill_viridis(
+    name = "Median Income ($)",
+    option = "plasma",
+    trans = "log",  # Useful for skewed income data
+    na.value = "grey90"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Median Household Income by Block Group (California, ACS 2019)",
+    caption = "Source: U.S. Census Bureau, 2019 ACS 5-Year Estimates"
+  )
+```
+
+```{r census-block-national, message=FALSE, warning=FALSE}
+
+
+# Get a list of state abbreviations for the 50 states plus DC.
+# fips_codes is provided with tidycensus.
+fips.states <- unique(fips_codes$state)[1:51]
+
+# Use future_map to download data for each state in parallel and then combine the results
+ntl_bg_sf <- reduce(
+  future_map(fips.states, function(x) {
+    get_acs(
+      geography = "block group", 
+      variables = c(
+        "pop"         = "B03002_001",  # Total population
+        "pop_nhwhite" = "B03002_003",  # Non-Hispanic White
+        "pop_nhblack" = "B03002_004",  # Non-Hispanic Black
+        "popx_nhamind"= "B03002_005",  # Non-Hispanic American Indian/Alaska Native
+        "popx_nhasian"= "B03002_006",  # Non-Hispanic Asian
+        "popx_nhhwnpi"= "B03002_007",  # Non-Hispanic Hawaiian/Pacific Islander
+        "popx_nhother"= "B03002_008",  # Non-Hispanic Other
+        "popx_nhtwomr"= "B03002_009",  # Non-Hispanic Two or More Races
+        "pop_hispltx" = "B03002_012",  # Hispanic/Latinx
+        "hu_total"    = "B25001_001",  # Total housing units
+        "hu_totocc"   = "B25003_001",  # Occupied housing units
+        "hu_totown"   = "B25003_002",  # Owner-occupied housing units
+        "hu_totrnt"   = "B25003_003",  # Renter-occupied housing units
+        "hh_total"    = "B19001_001",  # Total number of households
+        "hh_medinc"   = "B19013_001"   # Median household income
+      ),
+      year = 2019,
+      survey = "acs5",
+      state = x, 
+      geometry = TRUE, 
+      output = "wide",
+      keep_geo_vars = TRUE
+    )
+  }, .progress = TRUE),  # Displays a progress bar during the parallel execution
+  rbind  # Combine the list of state data frames into one large spatial data frame
+)
+
+# Optionally, you could save the combined data for future use
+sf::st_write(ntl_bg_sf, here::here("Data", "Processed", "ntl_bg_sf.shp"))
+
+```
+
+
+```{r plotting-national-census-data, message=FALSE, warning=FALSE}
+
+
+# Filter out geometries with missing income data
+ntl_income <- ntl_bg_sf %>%
+  filter(!is.na(hh_medincE))
+
+# Plot median household income by block group
+ggplot(data = ntl_income) +
+  geom_sf(aes(fill = hh_medincE), color = NA) +
+  scale_fill_viridis(
+    name = "Median Household Income",
+    option = "plasma",
+    trans = "log",  # Income is typically skewed, so log transform is helpful
+    na.value = "grey90"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Median Household Income by Census Block Group (ACS 2019)",
+    caption = "Data Source: U.S. Census Bureau, ACS 5-Year Estimates"
+  )
+```
+

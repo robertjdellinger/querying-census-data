@@ -1,0 +1,4 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+Data/Processed/*.shp !text !filter !merge !diff
+Data/Processed/*.dbf !text !filter !merge !diff
