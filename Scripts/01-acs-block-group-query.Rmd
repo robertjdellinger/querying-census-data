@@ -1,31 +1,7 @@
 ---
-title: "**Querying Census Data**"
+title: "**Querying Census Data: Census Blocks**"
 author: "Robert J. Dellinger"
 date: "2024"
-output:
-  html_document:
-    fig_caption: true
-    css: default
-header-includes:
-  # Set page margins using geometry package
-  - \usepackage{geometry}
-  - \geometry{left=1in, right=1in, top=1in, bottom=1in}
-  
-  # Enable double-spacing for readability
-  - \usepackage{setspace}
-  - \doublespacing
-  
-  # Customize the header and footer using fancyhdr
-  - \usepackage{fancyhdr}
-  - \pagestyle{fancy}
-  - \fancyhead[L]{}
-  - \fancyhead[C]{Scientific Hypothesis and Preliminary Data Explorations}
-  - \fancyhead[R]{}
-  - \fancyfoot[L]{}
-  - \fancyfoot[C]{\thepage}
-  - \fancyfoot[R]{}
-  - \renewcommand{\headrulewidth}{0.2pt}
-  - \renewcommand{\footrulewidth}{0pt}
 ---
 
 ------------------------------------------------------------------------
@@ -34,7 +10,9 @@ header-includes:
 
 ## Census Data Collection
 
-We obtained demographic, housing, and income data from the 2016–2020 American Community Survey (ACS) 5-Year Estimates at the block group level for Los Angeles County, California using the tidycensus R package (Walker, 2023). Data were accessed via the U.S. Census API, and spatial geometries were downloaded directly using the geometry = TRUE argument, leveraging TIGER/Line shapefiles via the tigris package.
+This project was developed to enable reproducible, efficient access to detailed census block group=l data for environmental studies. The intent is to support work that examines the human and environmental consequences of structural inequality, particularly through the lens of race, income, housing, and related social indicators.
+
+We obtained demographic, housing, and income data from the 2016–2020 American Community Survey (ACS) 5-Year Estimates at the block group level  using the tidycensus R package (Walker, 2023). Data were accessed via the U.S. Census API, and spatial geometries were downloaded directly using the geometry = TRUE argument, leveraging TIGER/Line shapefiles via the tigris package.
 
 We requested variables from the following ACS tables:
 	•	B03002: Race and Hispanic origin
@@ -57,6 +35,9 @@ library(sf)         # For handling spatial data
 library(ggplot2)     # For plotting
 ```
 
+## Load the necessary libraries and setup options
+
+This chunk loads the required libraries and sets up options for the `tigris` and `tidycensus` packages. It also sets up parallel processing using the `furrr` package.
 
 
 ```{r load-options}
@@ -74,15 +55,17 @@ print(paste("Thread count to use:", num_cores))
 plan(multisession, workers = num_cores)
 ```
 
+## Download ACS Block Group Data for States
 
+This chunk retrieves race, housing, and income data from ACS for all block groups in California, including geographic shapefiles.
 
 ```{r census-block-state, message=FALSE, warning=FALSE}
 
-# California only
+# select the state of interest here 
 fips.ca <- "CA"
 
 # Run with same structure (for consistency with national code)
-ca_bg_sf <- reduce(
+state_bg_sf <- reduce(
   future_map(fips.ca, function(x) {
     get_acs(
       geography = "block group", 
@@ -115,7 +98,7 @@ ca_bg_sf <- reduce(
 )
 
 # Plot map
-ggplot(data = ca_bg_sf) +
+state_bg_map <- ggplot(data = ca_bg_sf) +
   geom_sf(aes(fill = hh_medincE), color = NA) +
   viridis::scale_fill_viridis(
     name = "Median Income ($)",
@@ -128,7 +111,17 @@ ggplot(data = ca_bg_sf) +
     title = "Median Household Income by Block Group (California, ACS 2019)",
     caption = "Source: U.S. Census Bureau, 2019 ACS 5-Year Estimates"
   )
+
+Print(state_bg_map)
+ggsave(state_ct_map, filename = here::here("Outputs", "Figures", "ca_income_ct_map.png"), 
+       width = 10, height = 6, dpi = 300)
+
 ```
+
+## Download ACS Data for the Entire United States
+
+This chunk retrieves the same demographic and housing variables as above, but for all 50 states + DC.
+
 
 ```{r census-block-national, message=FALSE, warning=FALSE}
 
@@ -176,6 +169,10 @@ ntl_bg_sf <- reduce(
 ```
 
 
+## Visualize National Median Income
+
+This final chunk filters out rows with missing income and maps national median income at the block group level.
+
 ```{r plotting-national-census-data, message=FALSE, warning=FALSE}
 
 
@@ -184,7 +181,7 @@ ntl_income <- ntl_bg_sf %>%
   filter(!is.na(hh_medincE))
 
 # Plot median household income by block group
-ggplot(data = ntl_income) +
+ntl_bg_income_map <- ggplot(data = ntl_income) +
   geom_sf(aes(fill = hh_medincE), color = NA) +
   scale_fill_viridis(
     name = "Median Household Income",
@@ -197,5 +194,9 @@ ggplot(data = ntl_income) +
     title = "Median Household Income by Census Block Group (ACS 2019)",
     caption = "Data Source: U.S. Census Bureau, ACS 5-Year Estimates"
   )
+
+print(ntl_bg_income_map)
+ggsave(ntl_bg_income_map, filename = here::here("Outputs", "Figures", "ntl_bg_income_map.png"), 
+       width = 10, height = 6, dpi = 300)
 ```
 

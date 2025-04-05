@@ -1,0 +1,220 @@
+---
+title: "03-census-tract-query"
+author: "Robert J. Dellinger"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(furrr)
+library(purrr)
+library(tidycensus)
+library(tigris)
+library(sf)
+library(ggplot2)
+library(tmap)
+
+
+# Optional: Set your Census API key
+# census_api_key("YOUR_API_KEY", install = TRUE)
+
+```
+
+
+# Exploring the Decennial Census Data & Variables
+
+```{r}
+# List available summary files for 2020, 2010, or 2000
+summary_files(2020)
+summary_files(2010)
+summary_files(2000)
+
+# Load available population groups
+get_pop_groups(2020, "ddhca")
+get_pop_groups(2010, "sf2")
+get_pop_groups(2000, "sf2")
+```
+
+# Example: Total Population from 2010 Decennial Census
+
+```{r}
+total_population_10 <- get_decennial(
+  geography = "state", 
+  variables = "P001001",
+  year = 2010
+)
+```
+
+# Download Decennial Race Data for Tracts in a County
+
+```{r}
+# Download tract-level race data (without geometry)
+la_tract_race <- get_decennial(
+  geography = "tract",
+  state = "CA",
+  county = "Los Angeles",
+  variables = c(
+    Hispanic = "P2_002N",
+    White = "P2_005N",
+    Black = "P2_006N",
+    Native = "P2_007N",
+    Asian = "P2_008N"
+  ),
+  summary_var = "P2_001N",  # Total population
+  year = 2020,
+  geometry = FALSE,
+  output = "tidy"
+) %>%
+  mutate(percent = 100 * (value / summary_value))
+
+```
+
+
+```{r}
+# Download tract geometries for Los Angeles County
+la_tract_geom <- tracts(state = "CA", county = "Los Angeles", year = 2020, class = "sf")
+
+# Filter for Black population and join with geometry
+la_black_pct <- la_tract_race %>%
+  filter(variable == "Black") %>%
+  left_join(la_tract_geom, by = "GEOID") %>%
+  st_as_sf()
+la_latino_pct <- la_tract_race %>%
+  filter(variable == "Hispanic") %>%
+  left_join(la_tract_geom, by = "GEOID") %>%
+  st_as_sf()
+la_asian_pct <- la_tract_race %>% 
+  filter(variable == "Asian") %>%
+  left_join(la_tract_geom, by = "GEOID") %>%
+  st_as_sf()
+la_native_pct <- la_tract_race %>% 
+  filter(variable == "Native") %>%
+  left_join(la_tract_geom, by = "GEOID") %>%
+  st_as_sf()
+
+# Plot using tmap
+tmap_mode("plot")  # or "view" for interactive map
+tm_shape(la_black_pct) +
+  tm_polygons(
+    col = "percent",
+    style = "quantile",
+    n = 5,
+    palette = "Purples",
+    title = "Percent Black (2020)"
+  ) +
+  tm_layout(
+    title = "Percent Black Population by Census Tract\nLos Angeles County, 2020 Census",
+    frame = FALSE,
+    legend.outside = TRUE
+  )
+tmap_shape(la_latino_pct) +
+  tm_polygons(
+    col = "percent",
+    style = "quantile",
+    n = 5,
+    palette = "Blues",
+    title = "Percent Latino (2020)"
+  ) +
+  tm_layout(
+    title = "Percent Latino Population by Census Tract\nLos Angeles County, 2020 Census",
+    frame = FALSE,
+    legend.outside = TRUE
+  )
+tmap_shape(la_asian_pct) +
+  tm_polygons(
+    col = "percent",
+    style = "quantile",
+    n = 5,
+    palette = "Yellows",
+    title = "Percent Asian (2020)"
+  ) +
+  tm_layout(
+    title = "Percent Asian Population by Census Tract\nLos Angeles County, 2020 Census",
+    frame = FALSE,
+    legend.outside = TRUE
+  )
+tmap_shape(la_native_pct) +
+  tm_polygons(
+    col = "percent",
+    style = "quantile",
+    n = 5,
+    palette = "Reds",
+    title = "Percent Native (2020)"
+  ) +
+  tm_layout(
+    title = "Percent Native Population by Census Tract\nLos Angeles County, 2020 Census",
+    frame = FALSE,
+    legend.outside = TRUE
+  )
+```
+
+# Download Decennial Race Data at the Tract Level for All Counties in State
+
+
+##  Selecting a State for Tract Level Data
+
+```{r}
+# Set the state abbreviation
+state_abbr <- "CA"  # Change this to your desired state abbreviation
+
+# Retrieve list of counties for the selected state
+state_counties <- tidycensus::fips_codes %>%
+  filter(state == state_abbr) %>%
+  distinct(county) %>%
+  arrange(county) %>%
+  pull(county)
+
+# Print the list of counties
+print(state_counties)
+```
+
+## Downloading Data
+
+```{r}
+# Download tract-level race data for each county and combine into one dataset
+tract_race_all <- map_dfr(state_counties, function(county_name) {
+  message(glue::glue("Downloading: {county_name}"))
+
+  tryCatch({
+    get_decennial(
+      geography = "tract",
+      state = state_abbr,
+      county = county_name,
+      variables = c(
+        Hispanic = "P2_002N",
+        White = "P2_005N",
+        Black = "P2_006N",
+        Native = "P2_007N",
+        Asian = "P2_008N"
+      ),
+      summary_var = "P2_001N",
+      year = 2020,
+      geometry = FALSE,
+      output = "tidy"
+    ) %>%
+      mutate(
+        county = county_name,
+        percent = 100 * (value / summary_value)
+      )
+  }, error = function(e) {
+    message(glue::glue("Failed for: {county_name} — {e$message}"))
+    return(NULL)
+  })
+})
+
+# Quick view
+glimpse(tract_race_all)
+```
+
+
+```{r}
+# Summarize Racialized Composition by County
+tract_race_county <- tract_race_all %>% 
+  group_by(county, variable) %>%
+  summarise(
+    percent = mean(percent, na.rm = TRUE))
+print(tract_race_county)
+```
+
