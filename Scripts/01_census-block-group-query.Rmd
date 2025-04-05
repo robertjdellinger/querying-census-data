@@ -171,7 +171,7 @@ ntl_bg_sf <- reduce(
 )
 
 # Optionally, you could save the combined data for future use
-sf::st_write(ntl_bg_sf, here::here("Data", "Processed", "ntl_bg_sf.shp"))
+#sf::st_write(ntl_bg_sf, here::here("Data", "Processed", "ntl_bg_sf.shp"))
 
 ```
 
